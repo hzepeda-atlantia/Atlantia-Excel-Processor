@@ -158,7 +158,7 @@ def _winners_label_from_names(winners_mask, names):
     lab = [names[i] for i, w in enumerate(winners_mask) if w and names[i]]
     return ", ".join(lab) if lab else "(Sin ganadores)"
 
-def _compute_winners_for_concept_block(ws, topR: int, cols: list, letters: list, names: list) -> str:
+def _compute_winners_for_concept_block(ws, topR: int, cols: list, letters: list, names: list, base_min: float = BASE_MIN) -> str:
     S = len(cols)
 
     # <<< FIX NUEVO: si solo hay un segmento → no hay ganador >>>
@@ -168,7 +168,7 @@ def _compute_winners_for_concept_block(ws, topR: int, cols: list, letters: list,
     base_ok = []
     for idx in range(S):
         n_val = _parse_float_safe(ws.cell(topR, cols[idx]).value)
-        base_ok.append(n_val is not None and n_val >= BASE_MIN)
+        base_ok.append(n_val is not None and n_val >= base_min)
 
     beats = [[False] * S for _ in range(S)]
     for i in range(S):
@@ -218,7 +218,7 @@ def _compute_winners_for_concept_block(ws, topR: int, cols: list, letters: list,
     return "(Sin ganadores)"
 
 # ---------- DS CONCATEANDO ----------
-def build_ds_concat_map_for_ws(ws) -> dict:
+def build_ds_concat_map_for_ws(ws, base_min: float = BASE_MIN) -> dict:
     ds_concat = {}
     header_row, blocks = _scan_horizontal_blocks_dynamic(ws)
     if not header_row or not blocks:
@@ -253,7 +253,7 @@ def build_ds_concat_map_for_ws(ws) -> dict:
 
             seen, ordered = set(), []
             for blk in blocks:
-                lab = _compute_winners_for_concept_block(ws, topR, blk["cols"], blk["letters"], blk["names"])
+                lab = _compute_winners_for_concept_block(ws, topR, blk["cols"], blk["letters"], blk["names"], base_min=base_min)
                 if lab and lab != "(Sin ganadores)":
                     for token in [t.strip() for t in lab.split(",") if t.strip()]:
                         if token not in seen:
@@ -273,9 +273,9 @@ def build_ds_concat_map_for_ws(ws) -> dict:
     return ds_concat
 
 # ---------- Extracción filas ----------
-def extract_rows_from_ws(ws) -> List[Dict]:
+def extract_rows_from_ws(ws, base_min: float = BASE_MIN) -> List[Dict]:
     rows = []
-    ds_concat_map = build_ds_concat_map_for_ws(ws)
+    ds_concat_map = build_ds_concat_map_for_ws(ws, base_min=base_min)
 
     first_base_D = _find_first_base_in_col(ws, 4)
     if first_base_D is None:
@@ -526,7 +526,8 @@ def split_by_subclass(rows: List[Dict]) -> Dict[str, List[Dict]]:
 def process_workbook_by_pdp(
     input_file,
     segment_with_pdp: Optional[bool] = None,
-    general_sheet: Optional[str] = None
+    general_sheet: Optional[str] = None,
+    base_min: float = BASE_MIN
 ) -> str:
 
     cfg_segment, cfg_sheet = PDP_CONFIG
@@ -547,7 +548,7 @@ def process_workbook_by_pdp(
 
     extracted = {}
     for tname, ws in ws_map.items():
-        rows = extract_rows_from_ws(ws)
+        rows = extract_rows_from_ws(ws, base_min=base_min)
         rows = apply_global_rules(rows)
         extracted[tname] = rows
 
@@ -606,7 +607,7 @@ def process_workbook_by_pdp(
 
 # ===== Celda 3: Tabla DS por bloque + modo DS ONLY =====
 
-def build_ds_table_for_ws(ws):
+def build_ds_table_for_ws(ws, base_min: float = BASE_MIN):
     """
     Genera tabla a nivel:
       - pregunta
@@ -664,6 +665,7 @@ def build_ds_table_for_ws(ws):
                     blk["cols"],
                     blk["letters"],
                     blk["names"],
+                    base_min=base_min
                 )
                 per_block_labels.append(lab)
 
@@ -698,7 +700,7 @@ def build_ds_table_for_ws(ws):
     return results, len(blocks)
 
 
-def process_workbook_ds_only(input_file, sheet_name: str) -> str:
+def process_workbook_ds_only(input_file, sheet_name: str, base_min: float = BASE_MIN) -> str:
     """
     Procesa SOLO una hoja (sheet_name) y genera:
       - Archivo *_DS_ONLY_<sheet>.xlsx
@@ -713,7 +715,7 @@ def process_workbook_ds_only(input_file, sheet_name: str) -> str:
         raise ValueError(f"La hoja '{sheet_name}' no existe en el libro.")
 
     ws = wb_in[sheet_name]
-    rows, n_blocks = build_ds_table_for_ws(ws)
+    rows, n_blocks = build_ds_table_for_ws(ws, base_min=base_min)
 
     if not rows:
         raise ValueError(f"No se encontraron filas de conceptos en la hoja '{sheet_name}'.")

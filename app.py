@@ -4,7 +4,7 @@ import os
 
 # --- Page Config ---
 st.set_page_config(
-    page_title="Atlantia Excel Processor",
+    page_title="Tabular Simplifier",
     page_icon="📊",
     layout="wide"
 )
@@ -17,7 +17,7 @@ def load_css(file_name):
 load_css("styles.css")
 
 # --- Header ---
-st.markdown('<h1 style="text-align: center; margin-bottom: 2rem;">📊 <span class="gradient-text">Atlantia Excel Processor</span></h1>', unsafe_allow_html=True)
+st.markdown('<h1 style="text-align: center; margin-bottom: 2rem;">📊 <span class="gradient-text">Tabular Simplifier</span></h1>', unsafe_allow_html=True)
 
 # --- Sidebar ---
 with st.sidebar:
@@ -36,16 +36,26 @@ with st.sidebar:
         help="La hoja del Excel que contiene los datos principales."
     )
 
+    base_min = st.number_input(
+        "Mínimo de Base",
+        min_value=0,
+        max_value=500,
+        value=50,
+        step=1,
+        help="Bases menores a este número no serán consideradas para significancia."
+    )
+
     segment_pdp = False
         
     st.markdown("---")
     st.info("ℹ️ **Tip:** Asegúrate de que tu archivo Excel tenga la estructura correcta.")
 
 # --- Main Content ---
-col1, col2, col3 = st.columns([1, 2, 1])
+# Use a more centered layout for the upload card
+col1, col2, col3 = st.columns([1, 6, 1])
 
 with col2:
-    # Card Container
+    # Card Container with glassmorphism via CSS
     with st.container(border=True):
         st.markdown("### 📤 Cargar Archivo")
         st.markdown("Sube tu archivo `.xlsx` para comenzar el análisis.")
@@ -58,7 +68,7 @@ with col2:
             st.markdown("<br>", unsafe_allow_html=True)
             
             if st.button("🚀 Procesar Archivo", type="primary", use_container_width=True):
-                with st.spinner("🔄 Procesando datos... por favor espera."):
+                with st.spinner("✨ Procesando datos con magia..."):
                     try:
                         output_path = None
                         
@@ -66,12 +76,14 @@ with col2:
                             output_path = backend.process_workbook_by_pdp(
                                 uploaded_file,
                                 segment_with_pdp=segment_pdp,
-                                general_sheet=sheet_name
+                                general_sheet=sheet_name,
+                                base_min=base_min
                             )
                         else: # DS Only
                             output_path = backend.process_workbook_ds_only(
                                 uploaded_file,
-                                sheet_name=sheet_name
+                                sheet_name=sheet_name,
+                                base_min=base_min
                             )
                         
                         if output_path and os.path.exists(output_path):
