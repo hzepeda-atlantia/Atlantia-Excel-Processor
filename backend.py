@@ -340,8 +340,10 @@ def apply_global_rules(rows: List[Dict]) -> List[Dict]:
     for row in rows:
         p = row.get("pregunta", "")
         c = row.get("concepto", "")
-        if not _starts_with_pnum(p):
-            continue
+        # Procesar todas las preguntas, no solo las que empiezan con P
+        # (comentado el filtro restrictivo)
+        # if not _starts_with_pnum(p):
+        #     continue
         c_norm = _norm(c)
         if c_norm.lower() == "media":
             continue
@@ -376,6 +378,120 @@ def apply_global_rules(rows: List[Dict]) -> List[Dict]:
             reduced.append(row)
 
     return reduced
+
+# ---------- Excel Styling ----------
+def apply_styles(writer, sheet_name, df):
+    """
+    Aplica formato profesional con branding de Atlantia a la hoja de Excel generada:
+    - Encabezados con color corporativo Atlantia (#482F91) y negrita.
+    - Filtros automáticos.
+    - Paneles inmovilizados.
+    - Ancho de columnas inteligente.
+    - Formato de % para columnas de porcentaje.
+    """
+    workbook  = writer.book
+    worksheet = writer.sheets[sheet_name]
+    (max_row, max_col) = df.shape
+
+    # --- Definición de Formatos ---
+    # Encabezado: Color primario Atlantia (#482F91), texto blanco, negrita, centrado
+    header_fmt = workbook.add_format({
+        'bold': True,
+        'text_wrap': True,
+        'valign': 'vcenter',
+        'align': 'center',
+        'fg_color': '#482F91',  # Color primario Atlantia
+        'font_color': 'white',
+        'border': 1
+    })
+
+    # Texto general: Alineación vertical centrada, ajuste de texto si es largo
+    text_fmt = workbook.add_format({
+        'valign': 'vcenter',
+        'text_wrap': True
+    })
+    
+    # Números centrados
+    num_fmt = workbook.add_format({
+        'valign': 'vcenter',
+        'align': 'center'
+    })
+
+    # Porcentajes: Sin decimales (o usa '0.0%' para 1 decimal)
+    pct_fmt = workbook.add_format({
+        'num_format': '0%',
+        'valign': 'vcenter',
+        'align': 'center'
+    })
+
+    # Formato para ganadores (DS con ▲): Fondo morado claro Atlantia
+    winner_fmt = workbook.add_format({
+        'bg_color': '#E8DAFF',      # Morado claro (tinte del color secundario Atlantia)
+        'font_color': '#482F91',    # Color primario Atlantia
+        'valign': 'vcenter',
+        'text_wrap': True,
+        'bold': True
+    })
+
+    # --- Aplicar formato a los encabezados ---
+    # Sobreescribimos los encabezados de Pandas para ponerles nuestro estilo
+    for col_num, value in enumerate(df.columns.values):
+        worksheet.write(0, col_num, value, header_fmt)
+
+    # --- Configuración de la Hoja ---
+    # Agregar Autofiltros en los encabezados
+    worksheet.autofilter(0, 0, max_row, max_col - 1)
+    
+    # Inmovilizar la primera fila (encabezados)
+    worksheet.freeze_panes(1, 0)
+
+    # --- Ajuste de Ancho de Columnas y Formato de Celdas ---
+    col_indices = {}  # Mapeo de nombre de columna a índice
+    
+    for i, col in enumerate(df.columns):
+        # Lógica para ancho de columnas
+        col_name = str(col).lower()
+        col_indices[col_name] = i
+        
+        # Columnas de Texto grandes (Pregunta, Concepto)
+        if "pregunta" in col_name or "concepto" in col_name:
+            worksheet.set_column(i, i, 40, text_fmt)  # Ancho 40
+        
+        # Columnas de Porcentaje
+        elif "porcentaje" in col_name or "%" in col_name:
+            worksheet.set_column(i, i, 12, pct_fmt)  # Ancho 12 y formato %
+            
+        # Columnas numéricas cortas (n, Bloques)
+        elif "n" == col_name or "bloque" in col_name:
+             worksheet.set_column(i, i, 10, num_fmt)
+             
+        # Columna DS / Concatenado (puede ser larga pero no tanto como pregunta)
+        elif "ds" in col_name or "concatenado" in col_name:
+            worksheet.set_column(i, i, 25, text_fmt)
+            
+        # Default para cualquier otra cosa
+        else:
+            worksheet.set_column(i, i, 15, text_fmt)
+    
+    # --- Formato Condicional para Ganadores (DS/Concatenado) ---
+    # Resaltar celdas que contienen el símbolo de ganador "▲"
+    if 'ds' in col_indices:
+        ds_col = col_indices['ds']
+        worksheet.conditional_format(1, ds_col, max_row, ds_col, {
+            'type': 'text',
+            'criteria': 'containing',
+            'value': '▲',
+            'format': winner_fmt
+        })
+    
+    if 'concatenado' in col_indices:
+        concat_col = col_indices['concatenado']
+        worksheet.conditional_format(1, concat_col, max_row, concat_col, {
+            'type': 'text',
+            'criteria': 'containing',
+            'value': '▲',
+            'format': winner_fmt
+        })
 
 # ---------- PDP utils ----------
 def filter_rows_by_range(rows: List[Dict], p_ini: str, p_fin: str) -> List[Dict]:
@@ -444,11 +560,10 @@ def process_workbook_by_pdp(
     if sheet_key is not None:
         all_rows = extracted.get(sheet_key, [])
         if all_rows:
-            pd.DataFrame(all_rows, columns=FINAL_COLS).to_excel(
-                writer,
-                sheet_name="GENERAL",
-                index=False
-            )
+            df_gen = pd.DataFrame(all_rows, columns=FINAL_COLS)
+            s_name = "GENERAL"
+            df_gen.to_excel(writer, sheet_name=s_name, index=False)
+            apply_styles(writer, s_name, df_gen)
 
     if segment_with_pdp:
         for blk in PDP_BLOCKS:
@@ -465,22 +580,25 @@ def process_workbook_by_pdp(
                 continue
 
             if not do_split:
-                pd.DataFrame(rows_block, columns=FINAL_COLS).to_excel(
-                    writer, sheet_name=blk_name[:31], index=False
-                )
+                df_blk = pd.DataFrame(rows_block, columns=FINAL_COLS)
+                s_name = blk_name[:31]
+                df_blk.to_excel(writer, sheet_name=s_name, index=False)
+                apply_styles(writer, s_name, df_blk)
             else:
                 parts = split_by_subclass(rows_block)
 
-                pd.DataFrame(parts["general"], columns=FINAL_COLS).to_excel(
-                    writer, sheet_name=blk_name[:31], index=False
-                )
+                df_gral = pd.DataFrame(parts["general"], columns=FINAL_COLS)
+                s_name_gral = blk_name[:31]
+                df_gral.to_excel(writer, sheet_name=s_name_gral, index=False)
+                apply_styles(writer, s_name_gral, df_gral)
 
                 for flg in flags:
                     sub_rows = parts.get(flg, [])
                     if sub_rows:
-                        pd.DataFrame(sub_rows, columns=FINAL_COLS).to_excel(
-                            writer, sheet_name=f"{blk_name}_{flg}"[:31], index=False
-                        )
+                        df_sub = pd.DataFrame(sub_rows, columns=FINAL_COLS)
+                        s_name_sub = f"{blk_name}_{flg}"[:31]
+                        df_sub.to_excel(writer, sheet_name=s_name_sub, index=False)
+                        apply_styles(writer, s_name_sub, df_sub)
 
     writer.close()
     return out_path
@@ -607,6 +725,8 @@ def process_workbook_ds_only(input_file, sheet_name: str) -> str:
     os.close(fd)
 
     with pd.ExcelWriter(out_path, engine="xlsxwriter") as writer:
-        df.to_excel(writer, sheet_name="DS", index=False)
+        s_name = "DS"
+        df.to_excel(writer, sheet_name=s_name, index=False)
+        apply_styles(writer, s_name, df)
 
     return out_path
