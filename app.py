@@ -58,7 +58,7 @@ with col2:
     # Card Container with glassmorphism via CSS
     with st.container(border=True):
         st.markdown("### 📤 Cargar Archivo")
-        st.markdown("Sube tu archivo `.xlsx` para comenzar el análisis.")
+        st.markdown("Sube tu archivo `.xlsx` para comenzar la simplificación.")
         
         uploaded_file = st.file_uploader("", type=["xlsx"])
         
@@ -68,7 +68,7 @@ with col2:
             st.markdown("<br>", unsafe_allow_html=True)
             
             if st.button("🚀 Procesar Archivo", type="primary", use_container_width=True):
-                with st.spinner("✨ Procesando datos con magia..."):
+                with st.spinner("✨ Simplificando tabulares..."):
                     try:
                         output_path = None
                         
@@ -88,7 +88,7 @@ with col2:
                         
                         if output_path and os.path.exists(output_path):
                             st.balloons()
-                            st.markdown("### 🎉 ¡Procesamiento Completado!")
+                            st.markdown("### 🎉 ¡Simplificación Completada!")
                             st.markdown("Tu archivo está listo para descargar.")
                             
                             # Read file for download
