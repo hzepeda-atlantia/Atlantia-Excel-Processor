@@ -131,7 +131,30 @@ def _find_header_row_and_bases(ws):
 def _scan_horizontal_blocks_dynamic(ws):
     header_row, base_cols = _find_header_row_and_bases(ws)
     blocks = []
+    
+    # GRID: Si no hay columnas Base, buscar primer texto en columnas
     if not header_row or not base_cols:
+        # Buscar Base en columna B para encontrar el header
+        base_row_B = _find_first_base_in_col(ws, 2)
+        if not base_row_B:
+            return None, blocks
+        
+        # El header suele estar arriba de la fila Base
+        header_row = base_row_B - 1
+        max_col = ws.max_column
+        
+        # Crear un solo bloque con todas las columnas desde START_COL
+        cols, names, letters = [], [], []
+        for c in range(START_COL, max_col + 1):
+            nm = _norm(ws.cell(header_row, c).value)
+            if nm:  # Si hay contenido
+                lt = _norm(ws.cell(header_row + 1, c).value).lower()
+                cols.append(c)
+                names.append(nm)
+                letters.append(lt)
+        
+        if cols:
+            blocks.append({"cols": cols, "names": names, "letters": letters})
         return header_row, blocks
 
     max_col = ws.max_column
@@ -168,21 +191,53 @@ def _compute_winners_for_concept_block(ws, topR: int, cols: list, letters: list,
     base_ok = []
     for idx in range(S):
         n_val = _parse_float_safe(ws.cell(topR, cols[idx]).value)
+        
+        # Si n_val es None, puede ser Grid - buscar en fila Base de columna B
+        if n_val is None:
+            # Buscar la fila Base más cercana hacia arriba desde topR
+            base_row = None
+            for r in range(topR, 0, -1):
+                if _is_base_label(ws.cell(r, 2).value):
+                    base_row = r
+                    break
+            
+            if base_row:
+                # En Grid, los valores de N están en la fila Base
+                n_val = _parse_float_safe(ws.cell(base_row, cols[idx]).value)
+        
         base_ok.append(n_val is not None and n_val >= base_min)
 
     beats = [[False] * S for _ in range(S)]
     for i in range(S):
+        # Solo procesar si tiene base OK
+        if not base_ok[i]:
+            continue
+            
         ds_txt = _norm(ws.cell(topR + 2, cols[i]).value).lower()
         for j in range(S):
             if i == j:
+                continue
+            # Solo comparar con segmentos que tienen base OK
+            if not base_ok[j]:
                 continue
             lj = letters[j] if j < len(letters) else ""
             if lj and lj in ds_txt:
                 beats[i][j] = True
 
+    # Contar cuántos segmentos tienen base OK
+    valid_segments = sum(base_ok)
+    
+    # Si hay menos de 2 segmentos válidos, no hay ganadores
+    if valid_segments < 2:
+        return "(Sin ganadores)"
+
     winners = [False] * S
     for i in range(S):
-        if base_ok[i] and all(i == j or beats[i][j] for j in range(S)):
+        # Solo puede ganar si tiene base OK
+        if not base_ok[i]:
+            continue
+        # Debe ganarle a TODOS los otros que tienen base OK
+        if all(i == j or not base_ok[j] or beats[i][j] for j in range(S)):
             winners[i] = True
     if any(winners):
         return _winners_label_from_names(winners, names)
@@ -226,8 +281,13 @@ def build_ds_concat_map_for_ws(ws, base_min: float = BASE_MIN) -> dict:
 
     first_base_D = _find_first_base_in_col(ws, 4)
     if first_base_D is None:
-        return ds_concat
-    probe_row = first_base_D + 2
+        # GRID: Buscar Base en columna B
+        first_base_B = _find_first_base_in_col(ws, 2)
+        if first_base_B is None:
+            return ds_concat
+        probe_row = first_base_B
+    else:
+        probe_row = first_base_D + 2
 
     start_block_row = None
     for r in range(probe_row, ws.max_row + 1):
@@ -278,9 +338,16 @@ def extract_rows_from_ws(ws, base_min: float = BASE_MIN) -> List[Dict]:
     ds_concat_map = build_ds_concat_map_for_ws(ws, base_min=base_min)
 
     first_base_D = _find_first_base_in_col(ws, 4)
-    if first_base_D is None:
-        return rows
-    probe_row = first_base_D + 2
+    is_grid = (first_base_D is None)
+    
+    if is_grid:
+        # GRID: Buscar Base en columna B
+        first_base_B = _find_first_base_in_col(ws, 2)
+        if first_base_B is None:
+            return rows
+        probe_row = first_base_B
+    else:
+        probe_row = first_base_D + 2
     if probe_row > ws.max_row:
         return rows
 
@@ -308,25 +375,34 @@ def extract_rows_from_ws(ws, base_min: float = BASE_MIN) -> List[Dict]:
 
             topR = _merged_top_row(ws, r, 2)
 
-            n_val = _to_number_pct(ws.cell(r, 4).value)
-            n_val = float(n_val) if n_val is not None else 0.0
-
-            pr = r + 1
-            if pr >= end_row_exclusive:
-                porcentaje = 0.0
-            else:
-                parsed = _to_number_pct(ws.cell(pr, 4).value)
-                porcentaje = float(parsed) if parsed is not None else 0.0
-
             ds_val = ds_concat_map.get(topR, "")
+            
+            if is_grid:
+                # GRID: Solo pregunta, concepto, DS
+                rows.append({
+                    "pregunta": pregunta,
+                    "concepto": concepto,
+                    "DS": ds_val
+                })
+            else:
+                # NORMAL: pregunta, concepto, n, porcentaje, DS
+                n_val = _to_number_pct(ws.cell(r, 4).value)
+                n_val = float(n_val) if n_val is not None else 0.0
 
-            rows.append({
-                "pregunta": pregunta,
-                "concepto": concepto,
-                "n": n_val,
-                "porcentaje": porcentaje,
-                "DS": ds_val
-            })
+                pr = r + 1
+                if pr >= end_row_exclusive:
+                    porcentaje = 0.0
+                else:
+                    parsed = _to_number_pct(ws.cell(pr, 4).value)
+                    porcentaje = float(parsed) if parsed is not None else 0.0
+
+                rows.append({
+                    "pregunta": pregunta,
+                    "concepto": concepto,
+                    "n": n_val,
+                    "porcentaje": porcentaje,
+                    "DS": ds_val
+                })
 
             r = _merged_bottom_row(ws, r, 2) + 1 if _merged_range(ws, r, 2) else (r + 3)
 
@@ -544,11 +620,14 @@ def process_workbook_by_pdp(
     
     writer = pd.ExcelWriter(out_path, engine="xlsxwriter")
 
-    ws_map = {name: wb_in[name] for name in wb_in.sheetnames if name.strip().upper() in T_SHEETS}
+    # Procesar TODAS las hojas (no solo T1-T4)
+    ws_map = {name: wb_in[name] for name in wb_in.sheetnames}
 
     extracted = {}
     for tname, ws in ws_map.items():
         rows = extract_rows_from_ws(ws, base_min=base_min)
+        # Excluir filas con base menor al umbral (excepto Grid donde no hay 'n')
+        rows = [r for r in rows if ("n" not in r) or (r.get("n", 0) >= base_min)]
         rows = apply_global_rules(rows)
         extracted[tname] = rows
 
@@ -561,7 +640,11 @@ def process_workbook_by_pdp(
     if sheet_key is not None:
         all_rows = extracted.get(sheet_key, [])
         if all_rows:
-            df_gen = pd.DataFrame(all_rows, columns=FINAL_COLS)
+            # Detectar Grid: si no tiene 'n', es Grid
+            is_grid = "n" not in all_rows[0]
+            cols = ["pregunta", "concepto", "DS"] if is_grid else FINAL_COLS
+            
+            df_gen = pd.DataFrame(all_rows, columns=cols)
             s_name = "GENERAL"
             df_gen.to_excel(writer, sheet_name=s_name, index=False)
             apply_styles(writer, s_name, df_gen)
